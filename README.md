@@ -99,7 +99,8 @@ The frontend communicates with the backend through the REST API. The backend is 
 
 The project is currently organised into a backend, frontend, database migrations and documentation:
 
-```text`r`nraise-n-rescue/
+```text
+raise-n-rescue/
 |-- backend/
 |   |-- app/
 |       |-- api/
@@ -119,7 +120,8 @@ The project is currently organised into a backend, frontend, database migrations
 |   |-- engineering/
 |   |-- decisions/
 |
-|-- README.md`r`n```
+|-- README.md
+```
 
 ## Documentation
 
@@ -142,7 +144,6 @@ I split the project documentation into a few areas so that the different parts o
 
 ### Engineering
 
-- docs/engineering/development-workflow.md - how I approached development, verification and Git.
 - docs/engineering/testing-strategy.md - how I tested the system.
 - docs/engineering/security.md - the security decisions and requirements for the application.
 

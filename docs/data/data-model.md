@@ -73,8 +73,8 @@ Each user has:
 
 The user role determines the broad type of account:
 
-- `ADOPTER` — a public adopter account
-- `RESCUE_STAFF` — a staff account belonging to a rescue organisation
+- `ADOPTER` - a public adopter account
+- `RESCUE_STAFF` - a staff account belonging to a rescue organisation
 
 The database applies a role and organisation consistency rule:
 
@@ -603,10 +603,10 @@ Treating these responsibilities separately prevents business workflows from bein
 
 ## 27. Related documentation
 
-- `docs/product/requirements.md` — product and acceptance requirements
-- `docs/product/product-overview.md` — product purpose, users, scope, and boundaries
-- `docs/architecture/architecture.md` — system architecture and responsibility boundaries
-- `docs/architecture/api-design.md` — REST API contract and workflow design
-- `docs/architecture/technology-decisions.md` — technology choices and engineering reasoning
-- `docs/engineering/security.md` — security engineering decisions and controls
-- `docs/decisions/decision-log.md` — historical project decisions
+- `docs/product/requirements.md` - product and acceptance requirements
+- `docs/product/product-overview.md` - product purpose, users, scope, and boundaries
+- `docs/architecture/architecture.md` - system architecture and responsibility boundaries
+- `docs/architecture/api-design.md` - REST API contract and workflow design
+- `docs/architecture/technology-decisions.md` - technology choices and engineering reasoning
+- `docs/engineering/security.md` - security engineering decisions and controls
+- `docs/decisions/decision-log.md` - historical project decisions
