@@ -14,14 +14,21 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-database_url = URL.create(
-    drivername="postgresql+psycopg",
-    username=settings.database_user,
-    password=settings.database_password,
-    host=settings.database_host,
-    port=settings.database_port,
-    database=settings.database_name,
-)
+x_args = context.get_x_argument(as_dictionary=True)
+database_url_override = x_args.get("database_url")
+
+if database_url_override:
+    database_url = database_url_override
+else:
+    database_url = URL.create(
+        drivername="postgresql+psycopg",
+        username=settings.database_user,
+        password=settings.database_password,
+        host=settings.database_host,
+        port=settings.database_port,
+        database=settings.database_name,
+    ).render_as_string(hide_password=False)
+
 
 target_metadata = Base.metadata
 
@@ -30,7 +37,7 @@ def run_migrations_offline() -> None:
     """Run migrations in offline mode."""
 
     context.configure(
-        url=database_url.render_as_string(hide_password=False),
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -45,7 +52,7 @@ def run_migrations_online() -> None:
 
     connectable = engine_from_config(
         {
-            "sqlalchemy.url": database_url.render_as_string(hide_password=False),
+            "sqlalchemy.url": database_url,
         },
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
