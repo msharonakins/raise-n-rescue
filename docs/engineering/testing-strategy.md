@@ -252,14 +252,25 @@ The purpose is to prevent a previously fixed defect from silently returning as t
 
 ## 12. Implementation status
 
-The current project foundation includes the FastAPI application, SQLAlchemy models, PostgreSQL database, and Alembic migrations.
+The project now has a basic automated testing foundation using pytest.
 
-The full automated testing structure and test suite described in this document are not yet implemented.
+The current foundation includes:
+
+- pytest installed as a development dependency
+- explicit pytest configuration through `pytest.ini`
+- a `tests/` test suite directory
+- a `tests/unit/` unit-test directory
+- an initial unit test covering selected domain enum values
+- successful pytest discovery and execution of the current tests
+
+The broader automated testing structure and feature-level test suite described in this document are not yet implemented.
 
 Testing requirements that depend on currently incomplete application functionality will be implemented alongside those features rather than being treated as completed documentation-only requirements.
 
 In particular, tests will need to be added as the following areas are implemented:
 
+- backend domain and service logic
+- PostgreSQL integration and database integrity
 - authentication and server-managed sessions
 - role-based authorisation and organisation isolation
 - adopter profile workflows
@@ -270,6 +281,8 @@ In particular, tests will need to be added as the following areas are implemente
 - application status transitions
 - adoption completion
 - rescue organisation workflows
+- frontend behaviour
+- critical end-to-end user journeys
 
 ## 13. Definition of testing completeness
 
