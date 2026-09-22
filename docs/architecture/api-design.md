@@ -580,14 +580,9 @@ The API design is currently ahead of the implementation.
 
 ### Implementation alignment still required
 
-The current database schema does not yet contain every structure required by the API design.
+The current database schema contains the required application scalar snapshot fields, status-history actor field, and active-application uniqueness rule described by this API design.
 
-In particular:
-
-- application scalar snapshot fields still need to be implemented
-- application snapshot data must be persisted immutably at submission time
-- status-history actor information still needs to be implemented
-- the database needs the active-application uniqueness rule required to protect concurrent submissions
+The remaining implementation gaps are in the application services, API endpoints, request and response schemas, and workflow enforcement. Application submission must populate the snapshot fields from validated adopter information, create the initial status-history record, and handle the database uniqueness constraint safely during concurrent submissions.
 
 These are implementation gaps rather than reasons to weaken the API contract.
 
@@ -607,9 +602,9 @@ These concerns can be introduced later without changing the core separation betw
 
 ## 20. Related documentation
 
-- `docs/product/requirements.md` — product and acceptance requirements
-- `docs/product/product-overview.md` — product purpose, users, scope, and boundaries
-- `docs/architecture/architecture.md` — system architecture and responsibility boundaries
-- `docs/architecture/technology-decisions.md` — technology choices and engineering reasoning
-- `docs/data/data-model.md` — database and domain data model
-- `docs/engineering/security.md` — detailed security engineering decisions and controls
+- `docs/product/requirements.md` - product and acceptance requirements
+- `docs/product/product-overview.md` - product purpose, users, scope, and boundaries
+- `docs/architecture/architecture.md` - system architecture and responsibility boundaries
+- `docs/architecture/technology-decisions.md` - technology choices and engineering reasoning
+- `docs/data/data-model.md` - database and domain data model
+- `docs/engineering/security.md` - detailed security engineering decisions and controls

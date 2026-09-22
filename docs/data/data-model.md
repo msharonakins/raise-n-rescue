@@ -371,7 +371,7 @@ The intended application content includes:
 
 These fields represent information supplied by the applicant rather than server-controlled workflow data.
 
-The current implementation uses an `applicant_message` field instead of the three intended application fields. The application model therefore requires implementation alignment before the final application workflow is complete.
+The current implementation stores these three application fields directly on `applications`. The application submission workflow still needs to populate them from validated applicant input and enforce the complete application workflow.
 
 The application status is controlled by the backend state machine. Clients must not be able to assign arbitrary application statuses.
 
@@ -391,7 +391,7 @@ The intended relational snapshot data is represented through:
 
 The current preferred-species, preferred-size, and child-age-group application relationship tables provide the structure for these immutable relationships.
 
-The current database implementation does not yet contain all required scalar application snapshot fields. These fields must be added before application submission is fully aligned with the design.
+The current database implementation contains the required scalar application snapshot fields on `applications`. The application submission workflow must populate these fields from the adopter's current profile and preserve them as historical data.
 
 Snapshot data is historical application data. Updating the adopter's current profile must never rewrite an existing application snapshot.
 
@@ -414,7 +414,7 @@ History is append-only from the API perspective. A later status change creates a
 
 Together, the application and its status history provide both the current workflow state and the historical sequence of state changes.
 
-The current implementation stores `note` and `created_at` but does not yet store the actor who made the change. The history model therefore requires implementation alignment with the intended audit information.
+The current implementation stores `note`, `created_at`, and `changed_by`, which records the authenticated user responsible for the status change. The application service and API workflow must still ensure that history entries are created consistently for valid status transitions.
 
 ## 20. Database constraints and indexes
 
@@ -440,7 +440,7 @@ The application workflow also requires an active-application uniqueness rule so 
 
 The intended rule is a partial unique database index covering the adopter/animal relationship for active application statuses only. This allows historical terminal applications while preventing multiple active applications for the same animal.
 
-The active-application uniqueness rule is not yet present in the current migration and therefore remains an implementation alignment requirement.
+The current PostgreSQL migration implements this rule as a partial unique index covering the adopter/animal relationship for active application statuses only. The application service must still handle the resulting constraint safely when concurrent submissions occur.
 
 ## 21. PostgreSQL enum types
 

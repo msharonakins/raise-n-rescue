@@ -168,7 +168,7 @@ I have the initial project foundation in place:
 
 The full MVP is not implemented yet.
 
-Some parts of the design are therefore ahead of the code. For example, the complete authentication and session system, matching service, application workflow, immutable application snapshots, full REST API and automated tests still need to be implemented.
+Some parts of the design are therefore ahead of the code. For example, the complete authentication and session system, matching service, application workflow including snapshot persistence, full REST API and broader automated testing still need to be implemented.
 
 I'll keep the documentation clear about what is implemented, what has been designed but not implemented yet, and what has deliberately been deferred.
 

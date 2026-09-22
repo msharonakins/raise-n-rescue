@@ -334,7 +334,7 @@ The application workflow must be enforced by the backend service layer. The fron
 
 The application state machine and snapshot behaviour are designed but the application services, API endpoints, and complete workflow enforcement are not implemented yet.
 
-The current implementation requires further alignment with this design. The existing status-history model does not yet record the actor responsible for a change, and the application model does not yet contain all of the scalar snapshot fields described by the application design.
+The current database model now contains the status-history actor field and the required scalar application snapshot fields described by this design. The application services, API endpoints, and complete workflow enforcement are still not implemented.
 
 ## 9. Transactional workflows
 
@@ -362,7 +362,7 @@ The availability and duplicate-application checks must be re-evaluated as part o
 
 The data model is intended to enforce one active application per adopter and animal through a database constraint in addition to the service-level validation.
 
-The current migration does not yet contain the planned partial unique index for active applications, so this is a design requirement that still needs implementation alignment.
+The current migration implements the planned partial unique index for active applications. The application service must still handle the resulting database constraint safely when concurrent submissions occur.
 
 ### 9.2 Adoption completion
 
@@ -456,9 +456,9 @@ This document describes both the intended architecture and the current implement
 
 Several parts of the current database implementation need to be brought into alignment with the intended application design before the corresponding workflows are implemented.
 
-- The active-application uniqueness rule is designed but the current migration does not yet contain the planned partial unique index.
-- Application status history is designed to record the actor and reason for each change, while the current model records a note and creation timestamp without an actor field.
-- The application design requires immutable scalar profile snapshots, while the current application model does not yet contain all of those snapshot fields.
+- The active-application uniqueness rule is implemented as a partial unique index in the current migration. The application service must still handle the resulting constraint safely during concurrent submissions.
+- Application status history is implemented with an actor field, status, note, and creation timestamp. The application service must still ensure that history entries are created consistently for valid status transitions.
+- The application model contains the required scalar profile snapshot fields. The application submission service must still populate these fields from the adopter's profile and preserve the snapshot as historical data.
 - Application preference tables exist and can support snapshot data, but the submission service must populate them from the adopter's profile and preserve them as historical data.
 - The current favourites model uses `adopter_profile_id`, while earlier design material used `adopter_id`; the implementation should use one consistent identifier convention.
 
