@@ -28,6 +28,12 @@ class ApplicationStatusHistory(Base):
         nullable=False,
     )
 
+    changed_by: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+
     note: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
