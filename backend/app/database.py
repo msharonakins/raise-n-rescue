@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
+from sqlalchemy.orm import sessionmaker
 
 from backend.app.config import settings
 
@@ -14,3 +15,4 @@ database_url = URL.create(
 )
 
 engine = create_engine(database_url)
+SessionLocal = sessionmaker(bind=engine)
