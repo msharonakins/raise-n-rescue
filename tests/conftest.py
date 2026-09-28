@@ -54,3 +54,28 @@ def db_session(test_engine: Engine) -> Generator[Session, None, None]:
         session.close()
         transaction.rollback()
         connection.close()
+
+
+@pytest.fixture
+def service_sessions(
+    test_engine: Engine,
+) -> Generator[tuple[Session, Session], None, None]:
+    connection = test_engine.connect()
+    transaction = connection.begin()
+
+    setup_session = Session(
+        bind=connection,
+        join_transaction_mode="create_savepoint",
+    )
+    service_session = Session(
+        bind=connection,
+        join_transaction_mode="create_savepoint",
+    )
+
+    try:
+        yield setup_session, service_session
+    finally:
+        service_session.close()
+        setup_session.close()
+        transaction.rollback()
+        connection.close()
