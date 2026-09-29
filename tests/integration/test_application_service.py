@@ -4,8 +4,20 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.core.enums import AnimalStatus, ApplicationStatus
+from backend.app.core.enums import (
+    AnimalStatus,
+    ApplicationStatus,
+    ChildAgeGroup,
+    Size,
+    Species,
+)
 from backend.app.models.application_status_history import ApplicationStatusHistory
+from backend.app.models.application_child_age_group import ApplicationChildAgeGroup
+from backend.app.models.application_preferred_size import ApplicationPreferredSize
+from backend.app.models.application_preferred_species import ApplicationPreferredSpecies
+from backend.app.models.adopter_child_age_group import AdopterChildAgeGroup
+from backend.app.models.adopter_preferred_size import AdopterPreferredSize
+from backend.app.models.adopter_preferred_species import AdopterPreferredSpecies
 from backend.app.services.application_errors import (
     ActiveApplicationExistsError,
     AdopterProfileNotFoundError,
@@ -29,6 +41,36 @@ def test_submit_application_creates_application_and_initial_history(
     setup_session, service_session = service_sessions
 
     adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    setup_session.add_all(
+        [
+            AdopterPreferredSpecies(
+                adopter_profile_id=adopter_profile.id,
+                species=Species.DOG,
+            ),
+            AdopterPreferredSpecies(
+                adopter_profile_id=adopter_profile.id,
+                species=Species.CAT,
+            ),
+            AdopterPreferredSize(
+                adopter_profile_id=adopter_profile.id,
+                size=Size.MEDIUM,
+            ),
+            AdopterPreferredSize(
+                adopter_profile_id=adopter_profile.id,
+                size=Size.LARGE,
+            ),
+            AdopterChildAgeGroup(
+                adopter_profile_id=adopter_profile.id,
+                child_age_group=ChildAgeGroup.SCHOOL_AGE_CHILDREN,
+            ),
+            AdopterChildAgeGroup(
+                adopter_profile_id=adopter_profile.id,
+                child_age_group=ChildAgeGroup.TEENAGERS,
+            ),
+        ]
+    )
+    setup_session.flush()
 
     submission = ApplicationSubmissionData(
         animal_id=animal.id,
@@ -63,6 +105,41 @@ def test_submit_application_creates_application_and_initial_history(
     assert application.existing_cats == adopter_profile.existing_cats
     assert application.experience_level == adopter_profile.experience_level
     assert application.time_available == adopter_profile.time_available
+
+    preferred_species = service_session.execute(
+        select(ApplicationPreferredSpecies).where(
+            ApplicationPreferredSpecies.application_id == application.id
+        )
+    ).scalars().all()
+
+    assert {preference.species for preference in preferred_species} == {
+        Species.DOG,
+        Species.CAT,
+    }
+
+    preferred_sizes = service_session.execute(
+        select(ApplicationPreferredSize).where(
+            ApplicationPreferredSize.application_id == application.id
+        )
+    ).scalars().all()
+
+    assert {preference.size for preference in preferred_sizes} == {
+        Size.MEDIUM,
+        Size.LARGE,
+    }
+
+    child_age_groups = service_session.execute(
+        select(ApplicationChildAgeGroup).where(
+            ApplicationChildAgeGroup.application_id == application.id
+        )
+    ).scalars().all()
+
+    assert {
+        preference.child_age_group for preference in child_age_groups
+    } == {
+        ChildAgeGroup.SCHOOL_AGE_CHILDREN,
+        ChildAgeGroup.TEENAGERS,
+    }
 
     status_history = service_session.execute(
         select(ApplicationStatusHistory).where(

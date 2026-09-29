@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.enums import AnimalStatus, ApplicationStatus
 from backend.app.models.application import Application
+from backend.app.models.application_child_age_group import ApplicationChildAgeGroup
+from backend.app.models.application_preferred_size import ApplicationPreferredSize
+from backend.app.models.application_preferred_species import ApplicationPreferredSpecies
 from backend.app.models.application_status_history import ApplicationStatusHistory
 from backend.app.repositories.adopter_profile_repository import (
     AdopterProfileRepository,
@@ -101,6 +104,48 @@ class ApplicationService:
 
             self.application_repository.add(application)
             self.session.flush()
+
+            preferred_species = (
+                self.adopter_profile_repository.get_preferred_species(
+                    adopter_profile.id
+                )
+            )
+
+            for preference in preferred_species:
+                self.session.add(
+                    ApplicationPreferredSpecies(
+                        application_id=application.id,
+                        species=preference.species,
+                    )
+                )
+
+            preferred_sizes = (
+                self.adopter_profile_repository.get_preferred_sizes(
+                    adopter_profile.id
+                )
+            )
+
+            for preference in preferred_sizes:
+                self.session.add(
+                    ApplicationPreferredSize(
+                        application_id=application.id,
+                        size=preference.size,
+                    )
+                )
+
+            child_age_groups = (
+                self.adopter_profile_repository.get_child_age_groups(
+                    adopter_profile.id
+                )
+            )
+
+            for preference in child_age_groups:
+                self.session.add(
+                    ApplicationChildAgeGroup(
+                        application_id=application.id,
+                        child_age_group=preference.child_age_group,
+                    )
+                )
 
             status_history = ApplicationStatusHistory(
                 application_id=application.id,
