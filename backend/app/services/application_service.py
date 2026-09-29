@@ -15,9 +15,14 @@ from backend.app.services.application_errors import (
     AdopterProfileNotFoundError,
     AnimalNotAvailableError,
     AnimalNotFoundError,
+    ApplicationNotFoundError,
     InvalidApplicationSubmissionError,
+    InvalidApplicationStatusTransitionError,
 )
 from backend.app.services.application_inputs import ApplicationSubmissionData
+from backend.app.services.application_status_transitions import (
+    is_valid_application_status_transition,
+)
 
 
 class ApplicationService:
@@ -102,6 +107,41 @@ class ApplicationService:
                 status=ApplicationStatus.SUBMITTED,
                 changed_by=user_id,
                 note=None,
+            )
+
+            self.application_repository.add_status_history(status_history)
+
+        return application
+
+    def transition_application_status(
+        self,
+        application_id: uuid.UUID,
+        target_status: ApplicationStatus,
+        changed_by: uuid.UUID,
+        note: str | None = None,
+    ) -> Application:
+        with self.session.begin():
+            application = self.application_repository.get_by_id(application_id)
+
+            if application is None:
+                raise ApplicationNotFoundError("Application not found.")
+
+            if not is_valid_application_status_transition(
+                application.status,
+                target_status,
+            ):
+                raise InvalidApplicationStatusTransitionError(
+                    f"Cannot transition application from "
+                    f"{application.status.value} to {target_status.value}."
+                )
+
+            application.status = target_status
+
+            status_history = ApplicationStatusHistory(
+                application_id=application.id,
+                status=target_status,
+                changed_by=changed_by,
+                note=note,
             )
 
             self.application_repository.add_status_history(status_history)

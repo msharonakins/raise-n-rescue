@@ -11,7 +11,9 @@ from backend.app.services.application_errors import (
     AdopterProfileNotFoundError,
     AnimalNotAvailableError,
     AnimalNotFoundError,
+    ApplicationNotFoundError,
     InvalidApplicationSubmissionError,
+    InvalidApplicationStatusTransitionError,
 )
 from backend.app.services.application_inputs import ApplicationSubmissionData
 from backend.app.services.application_service import ApplicationService
@@ -214,3 +216,149 @@ def test_submit_application_raises_when_care_plan_is_blank(
             user_id=adopter_profile.user_id,
             submission=submission,
         )
+
+
+def test_transition_application_status_updates_status_and_creates_history(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.SUBMITTED,
+    )
+    setup_session.add(application)
+    setup_session.flush()
+
+    service = ApplicationService(service_session)
+
+    note = "Initial application review completed."
+
+    updated_application = service.transition_application_status(
+        application_id=application.id,
+        target_status=ApplicationStatus.UNDER_REVIEW,
+        changed_by=adopter_profile.user_id,
+        note=note,
+    )
+
+    assert updated_application.status == ApplicationStatus.UNDER_REVIEW
+
+    status_history = service_session.execute(
+        select(ApplicationStatusHistory).where(
+            ApplicationStatusHistory.application_id == application.id
+        )
+    ).scalars().all()
+
+    assert len(status_history) == 1
+    assert status_history[0].status == ApplicationStatus.UNDER_REVIEW
+    assert status_history[0].changed_by == adopter_profile.user_id
+    assert status_history[0].note == note
+
+
+def test_transition_application_status_raises_when_application_does_not_exist(
+    service_sessions: tuple[Session, Session],
+):
+    _, service_session = service_sessions
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(ApplicationNotFoundError):
+        service.transition_application_status(
+            application_id=uuid.uuid4(),
+            target_status=ApplicationStatus.UNDER_REVIEW,
+            changed_by=uuid.uuid4(),
+        )
+
+
+def test_transition_application_status_raises_for_invalid_transition(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.SUBMITTED,
+    )
+    setup_session.add(application)
+    setup_session.flush()
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(InvalidApplicationStatusTransitionError):
+        service.transition_application_status(
+            application_id=application.id,
+            target_status=ApplicationStatus.APPROVED,
+            changed_by=adopter_profile.user_id,
+        )
+
+    assert application.status == ApplicationStatus.SUBMITTED
+
+    status_history = service_session.execute(
+        select(ApplicationStatusHistory).where(
+            ApplicationStatusHistory.application_id == application.id
+        )
+    ).scalars().all()
+
+    assert status_history == []
+
+
+def test_transition_application_status_can_follow_multiple_valid_transitions(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.SUBMITTED,
+    )
+    setup_session.add(application)
+    setup_session.flush()
+
+    service = ApplicationService(service_session)
+
+    service.transition_application_status(
+        application_id=application.id,
+        target_status=ApplicationStatus.UNDER_REVIEW,
+        changed_by=adopter_profile.user_id,
+    )
+
+    service.transition_application_status(
+        application_id=application.id,
+        target_status=ApplicationStatus.HOME_CHECK,
+        changed_by=adopter_profile.user_id,
+    )
+
+    service.transition_application_status(
+        application_id=application.id,
+        target_status=ApplicationStatus.APPROVED,
+        changed_by=adopter_profile.user_id,
+    )
+
+    persisted_application = service_session.get(
+        type(application),
+        application.id,
+    )
+
+    assert persisted_application is not None
+    assert persisted_application.status == ApplicationStatus.APPROVED
+
+    status_history = service_session.execute(
+        select(ApplicationStatusHistory)
+        .where(ApplicationStatusHistory.application_id == application.id)
+        .order_by(ApplicationStatusHistory.created_at)
+    ).scalars().all()
+
+    assert [history.status for history in status_history] == [
+        ApplicationStatus.UNDER_REVIEW,
+        ApplicationStatus.HOME_CHECK,
+        ApplicationStatus.APPROVED,
+    ]
