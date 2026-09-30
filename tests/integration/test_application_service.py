@@ -11,6 +11,7 @@ from backend.app.core.enums import (
     Size,
     Species,
 )
+from backend.app.models.application import Application
 from backend.app.models.application_status_history import ApplicationStatusHistory
 from backend.app.models.application_child_age_group import ApplicationChildAgeGroup
 from backend.app.models.application_preferred_size import ApplicationPreferredSize
@@ -21,7 +22,6 @@ from backend.app.models.adopter_preferred_species import AdopterPreferredSpecies
 from backend.app.services.application_errors import (
     ActiveApplicationExistsError,
     AdopterProfileNotFoundError,
-    IncompleteAdopterProfileError,
     AnimalNotAvailableError,
     AnimalNotFoundError,
     ApplicationNotFoundError,
@@ -175,37 +175,6 @@ def test_submit_application_raises_when_adopter_profile_does_not_exist(
         )
 
 
-def test_submit_application_raises_when_adopter_profile_is_incomplete(
-    service_sessions: tuple[Session, Session],
-    monkeypatch: pytest.MonkeyPatch,
-):
-    setup_session, service_session = service_sessions
-
-    adopter_profile, animal = create_adopter_and_animal(setup_session)
-
-    adopter_profile.home_type = None
-
-    submission = ApplicationSubmissionData(
-        animal_id=animal.id,
-        reason_for_adoption="I want to provide a permanent home.",
-        care_plan="I will provide daily exercise, feeding, and veterinary care.",
-    )
-
-    service = ApplicationService(service_session)
-
-    monkeypatch.setattr(
-        service.adopter_profile_repository,
-        "get_by_user_id",
-        lambda user_id: adopter_profile,
-    )
-
-    with pytest.raises(IncompleteAdopterProfileError):
-        service.submit_application(
-            user_id=adopter_profile.user_id,
-            submission=submission,
-        )
-
-
 def test_submit_application_raises_when_animal_does_not_exist(
     service_sessions: tuple[Session, Session],
 ):
@@ -281,6 +250,53 @@ def test_submit_application_raises_when_active_application_exists(
             user_id=adopter_profile.user_id,
             submission=submission,
         )
+
+
+def test_submit_application_translates_active_application_unique_constraint(
+    service_sessions: tuple[Session, Session],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    existing_application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.SUBMITTED,
+    )
+    setup_session.add(existing_application)
+    setup_session.flush()
+
+    submission = ApplicationSubmissionData(
+        animal_id=animal.id,
+        reason_for_adoption="I want to provide another permanent home.",
+        care_plan="I will provide daily exercise, feeding, and veterinary care.",
+    )
+
+    service = ApplicationService(service_session)
+
+    monkeypatch.setattr(
+        service.application_repository,
+        "get_active_by_adopter_and_animal",
+        lambda adopter_profile_id, animal_id: None,
+    )
+
+    with pytest.raises(ActiveApplicationExistsError):
+        service.submit_application(
+            user_id=adopter_profile.user_id,
+            submission=submission,
+        )
+
+    application_count = service_session.execute(
+        select(Application).where(
+            Application.adopter_profile_id == adopter_profile.id,
+            Application.animal_id == animal.id,
+        )
+    ).scalars().all()
+
+    assert len(application_count) == 1
+    assert application_count[0].id == existing_application.id
 
 
 def test_submit_application_raises_when_reason_for_adoption_is_blank(

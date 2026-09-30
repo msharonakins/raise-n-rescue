@@ -1,5 +1,6 @@
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.core.enums import AnimalStatus, ApplicationStatus
@@ -17,19 +18,30 @@ from backend.app.services.application_errors import (
     ActiveApplicationExistsError,
     AdopterProfileNotFoundError,
     AnimalNotAvailableError,
-    IncompleteAdopterProfileError,
     AnimalNotFoundError,
     ApplicationNotFoundError,
     InvalidApplicationSubmissionError,
     InvalidApplicationStatusTransitionError,
 )
 from backend.app.services.application_inputs import ApplicationSubmissionData
-from backend.app.services.adopter_profile_validation import (
-    is_adopter_profile_complete,
-)
 from backend.app.services.application_status_transitions import (
     is_valid_application_status_transition,
 )
+
+
+ACTIVE_APPLICATION_UNIQUE_CONSTRAINT = (
+    "uq_applications_one_active_per_adopter_animal"
+)
+
+
+def _is_active_application_unique_violation(
+    error: IntegrityError,
+) -> bool:
+    original_error = error.orig
+    diagnostic = getattr(original_error, "diag", None)
+    constraint_name = getattr(diagnostic, "constraint_name", None)
+
+    return constraint_name == ACTIVE_APPLICATION_UNIQUE_CONSTRAINT
 
 
 class ApplicationService:
@@ -55,115 +67,119 @@ class ApplicationService:
                 "Care plan must not be blank."
             )
 
-        with self.session.begin():
-            adopter_profile = self.adopter_profile_repository.get_by_user_id(
-                user_id
-            )
-
-            if adopter_profile is None:
-                raise AdopterProfileNotFoundError(
-                    "Adopter profile not found."
+        try:
+            with self.session.begin():
+                adopter_profile = self.adopter_profile_repository.get_by_user_id(
+                    user_id
                 )
 
-            animal = self.animal_repository.get_by_id(submission.animal_id)
+                if adopter_profile is None:
+                    raise AdopterProfileNotFoundError(
+                        "Adopter profile not found."
+                    )
 
-            if animal is None:
-                raise AnimalNotFoundError(
-                    "Animal not found."
+                animal = self.animal_repository.get_by_id(submission.animal_id)
+
+                if animal is None:
+                    raise AnimalNotFoundError(
+                        "Animal not found."
+                    )
+
+                if animal.status != AnimalStatus.AVAILABLE:
+                    raise AnimalNotAvailableError(
+                        "Animal is not currently available for applications."
+                    )
+
+                active_application = (
+                    self.application_repository.get_active_by_adopter_and_animal(
+                        adopter_profile.id,
+                        animal.id,
+                    )
                 )
 
-            if animal.status != AnimalStatus.AVAILABLE:
-                raise AnimalNotAvailableError(
-                    "Animal is not currently available for applications."
+                if active_application is not None:
+                    raise ActiveApplicationExistsError(
+                        "An active application already exists for this adopter and animal."
+                    )
+
+                application = Application(
+                    adopter_profile_id=adopter_profile.id,
+                    animal_id=animal.id,
+                    status=ApplicationStatus.SUBMITTED,
+                    reason_for_adoption=submission.reason_for_adoption,
+                    care_plan=submission.care_plan,
+                    additional_information=submission.additional_information,
+                    home_type=adopter_profile.home_type,
+                    outdoor_space=adopter_profile.outdoor_space,
+                    activity_level=adopter_profile.activity_level,
+                    children_in_household=adopter_profile.children_in_household,
+                    existing_dogs=adopter_profile.existing_dogs,
+                    existing_cats=adopter_profile.existing_cats,
+                    experience_level=adopter_profile.experience_level,
+                    time_available=adopter_profile.time_available,
                 )
 
-            active_application = (
-                self.application_repository.get_active_by_adopter_and_animal(
-                    adopter_profile.id,
-                    animal.id,
-                )
-            )
+                self.application_repository.add(application)
+                self.session.flush()
 
-            if active_application is not None:
+                preferred_species = (
+                    self.adopter_profile_repository.get_preferred_species(
+                        adopter_profile.id
+                    )
+                )
+
+                for preference in preferred_species:
+                    self.session.add(
+                        ApplicationPreferredSpecies(
+                            application_id=application.id,
+                            species=preference.species,
+                        )
+                    )
+
+                preferred_sizes = (
+                    self.adopter_profile_repository.get_preferred_sizes(
+                        adopter_profile.id
+                    )
+                )
+
+                for preference in preferred_sizes:
+                    self.session.add(
+                        ApplicationPreferredSize(
+                            application_id=application.id,
+                            size=preference.size,
+                        )
+                    )
+
+                child_age_groups = (
+                    self.adopter_profile_repository.get_child_age_groups(
+                        adopter_profile.id
+                    )
+                )
+
+                for preference in child_age_groups:
+                    self.session.add(
+                        ApplicationChildAgeGroup(
+                            application_id=application.id,
+                            child_age_group=preference.child_age_group,
+                        )
+                    )
+
+                status_history = ApplicationStatusHistory(
+                    application_id=application.id,
+                    status=ApplicationStatus.SUBMITTED,
+                    changed_by=user_id,
+                    note=None,
+                )
+
+                self.application_repository.add_status_history(status_history)
+
+        except IntegrityError as error:
+            if _is_active_application_unique_violation(error):
                 raise ActiveApplicationExistsError(
                     "An active application already exists for this adopter and animal."
-                )
+                ) from error
 
-            if not is_adopter_profile_complete(adopter_profile):
-                raise IncompleteAdopterProfileError(
-                    "Adopter profile is incomplete for application submission."
-                )
-
-            application = Application(
-                adopter_profile_id=adopter_profile.id,
-                animal_id=animal.id,
-                status=ApplicationStatus.SUBMITTED,
-                reason_for_adoption=submission.reason_for_adoption,
-                care_plan=submission.care_plan,
-                additional_information=submission.additional_information,
-                home_type=adopter_profile.home_type,
-                outdoor_space=adopter_profile.outdoor_space,
-                activity_level=adopter_profile.activity_level,
-                children_in_household=adopter_profile.children_in_household,
-                existing_dogs=adopter_profile.existing_dogs,
-                existing_cats=adopter_profile.existing_cats,
-                experience_level=adopter_profile.experience_level,
-                time_available=adopter_profile.time_available,
-            )
-
-            self.application_repository.add(application)
-            self.session.flush()
-
-            preferred_species = (
-                self.adopter_profile_repository.get_preferred_species(
-                    adopter_profile.id
-                )
-            )
-
-            for preference in preferred_species:
-                self.session.add(
-                    ApplicationPreferredSpecies(
-                        application_id=application.id,
-                        species=preference.species,
-                    )
-                )
-
-            preferred_sizes = (
-                self.adopter_profile_repository.get_preferred_sizes(
-                    adopter_profile.id
-                )
-            )
-
-            for preference in preferred_sizes:
-                self.session.add(
-                    ApplicationPreferredSize(
-                        application_id=application.id,
-                        size=preference.size,
-                    )
-                )
-
-            child_age_groups = (
-                self.adopter_profile_repository.get_child_age_groups(
-                    adopter_profile.id
-                )
-            )
-
-            for preference in child_age_groups:
-                self.session.add(
-                    ApplicationChildAgeGroup(
-                        application_id=application.id,
-                        child_age_group=preference.child_age_group,
-                    )
-                )
-
-            status_history = ApplicationStatusHistory(
-                application_id=application.id,
-                status=ApplicationStatus.SUBMITTED,
-                changed_by=user_id,
-                note=None,
-            )
-
-            self.application_repository.add_status_history(status_history)
+            raise
 
         return application
 
