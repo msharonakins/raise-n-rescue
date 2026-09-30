@@ -21,6 +21,7 @@ from backend.app.models.adopter_preferred_species import AdopterPreferredSpecies
 from backend.app.services.application_errors import (
     ActiveApplicationExistsError,
     AdopterProfileNotFoundError,
+    IncompleteAdopterProfileError,
     AnimalNotAvailableError,
     AnimalNotFoundError,
     ApplicationNotFoundError,
@@ -170,6 +171,37 @@ def test_submit_application_raises_when_adopter_profile_does_not_exist(
     with pytest.raises(AdopterProfileNotFoundError):
         service.submit_application(
             user_id=uuid.uuid4(),
+            submission=submission,
+        )
+
+
+def test_submit_application_raises_when_adopter_profile_is_incomplete(
+    service_sessions: tuple[Session, Session],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    adopter_profile.home_type = None
+
+    submission = ApplicationSubmissionData(
+        animal_id=animal.id,
+        reason_for_adoption="I want to provide a permanent home.",
+        care_plan="I will provide daily exercise, feeding, and veterinary care.",
+    )
+
+    service = ApplicationService(service_session)
+
+    monkeypatch.setattr(
+        service.adopter_profile_repository,
+        "get_by_user_id",
+        lambda user_id: adopter_profile,
+    )
+
+    with pytest.raises(IncompleteAdopterProfileError):
+        service.submit_application(
+            user_id=adopter_profile.user_id,
             submission=submission,
         )
 

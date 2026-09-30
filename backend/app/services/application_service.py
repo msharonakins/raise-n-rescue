@@ -17,12 +17,16 @@ from backend.app.services.application_errors import (
     ActiveApplicationExistsError,
     AdopterProfileNotFoundError,
     AnimalNotAvailableError,
+    IncompleteAdopterProfileError,
     AnimalNotFoundError,
     ApplicationNotFoundError,
     InvalidApplicationSubmissionError,
     InvalidApplicationStatusTransitionError,
 )
 from backend.app.services.application_inputs import ApplicationSubmissionData
+from backend.app.services.adopter_profile_validation import (
+    is_adopter_profile_complete,
+)
 from backend.app.services.application_status_transitions import (
     is_valid_application_status_transition,
 )
@@ -83,6 +87,11 @@ class ApplicationService:
             if active_application is not None:
                 raise ActiveApplicationExistsError(
                     "An active application already exists for this adopter and animal."
+                )
+
+            if not is_adopter_profile_complete(adopter_profile):
+                raise IncompleteAdopterProfileError(
+                    "Adopter profile is incomplete for application submission."
                 )
 
             application = Application(

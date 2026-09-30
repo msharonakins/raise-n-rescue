@@ -6,6 +6,10 @@ class AdopterProfileNotFoundError(ApplicationError):
     """Raised when the authenticated adopter has no profile."""
 
 
+class IncompleteAdopterProfileError(ApplicationError):
+    """Raised when an adopter profile is incomplete for application submission."""
+
+
 class AnimalNotFoundError(ApplicationError):
     """Raised when the requested animal does not exist."""
 
