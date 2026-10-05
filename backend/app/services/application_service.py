@@ -217,3 +217,78 @@ class ApplicationService:
             self.application_repository.add_status_history(status_history)
 
         return application
+
+    def complete_adoption(
+        self,
+        application_id: uuid.UUID,
+        changed_by: uuid.UUID,
+    ) -> Application:
+        with self.session.begin():
+            application = self.application_repository.get_by_id(
+                application_id
+            )
+
+            if application is None:
+                raise ApplicationNotFoundError(
+                    "Application not found."
+                )
+
+            animal = self.animal_repository.get_by_id(
+                application.animal_id
+            )
+
+            if animal is None:
+                raise AnimalNotFoundError(
+                    "Animal not found."
+                )
+
+            if not is_valid_application_status_transition(
+                application.status,
+                ApplicationStatus.ADOPTED,
+            ):
+                raise InvalidApplicationStatusTransitionError(
+                    f"Cannot transition application from "
+                    f"{application.status.value} to "
+                    f"{ApplicationStatus.ADOPTED.value}."
+                )
+
+            application.status = ApplicationStatus.ADOPTED
+            animal.status = AnimalStatus.ADOPTED
+
+            status_history = ApplicationStatusHistory(
+                application_id=application.id,
+                status=ApplicationStatus.ADOPTED,
+                changed_by=changed_by,
+                note=None,
+            )
+
+            self.application_repository.add_status_history(
+                status_history
+            )
+
+            active_applications = (
+                self.application_repository.get_active_by_animal(
+                    animal.id
+                )
+            )
+
+            for other_application in active_applications:
+                if other_application.id == application.id:
+                    continue
+
+                other_application.status = (
+                    ApplicationStatus.CLOSED_ANIMAL_ADOPTED
+                )
+
+                other_status_history = ApplicationStatusHistory(
+                    application_id=other_application.id,
+                    status=ApplicationStatus.CLOSED_ANIMAL_ADOPTED,
+                    changed_by=changed_by,
+                    note=None,
+                )
+
+                self.application_repository.add_status_history(
+                    other_status_history
+                )
+
+        return application

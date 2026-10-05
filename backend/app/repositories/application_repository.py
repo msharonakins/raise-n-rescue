@@ -35,6 +35,23 @@ class ApplicationRepository:
         )
         return self.session.execute(statement).scalar_one_or_none()
 
+    def get_active_by_animal(
+        self,
+        animal_id: uuid.UUID,
+    ) -> list[Application]:
+        statement = select(Application).where(
+            Application.animal_id == animal_id,
+            Application.status.in_(
+                (
+                    ApplicationStatus.SUBMITTED,
+                    ApplicationStatus.UNDER_REVIEW,
+                    ApplicationStatus.HOME_CHECK,
+                    ApplicationStatus.APPROVED,
+                )
+            ),
+        )
+        return list(self.session.execute(statement).scalars().all())
+
     def add(self, application: Application) -> Application:
         self.session.add(application)
         return application

@@ -11,6 +11,7 @@ from backend.app.core.enums import (
     Size,
     Species,
 )
+from backend.app.models.animal import Animal
 from backend.app.models.application import Application
 from backend.app.models.application_status_history import ApplicationStatusHistory
 from backend.app.models.application_child_age_group import ApplicationChildAgeGroup
@@ -487,3 +488,282 @@ def test_transition_application_status_can_follow_multiple_valid_transitions(
         ApplicationStatus.HOME_CHECK,
         ApplicationStatus.APPROVED,
     ]
+
+
+def test_complete_adoption_updates_application_and_animal(
+    service_sessions: tuple[Session, Session],
+) -> None:
+    db_session, service_session = service_sessions
+    adopter_profile, animal = create_adopter_and_animal(db_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.APPROVED,
+    )
+    db_session.add(application)
+    db_session.commit()
+
+    service = ApplicationService(service_session)
+
+    result = service.complete_adoption(
+        application_id=application.id,
+        changed_by=adopter_profile.user_id,
+    )
+
+    db_session.expire_all()
+
+    refreshed_application = db_session.get(Application, application.id)
+    refreshed_animal = db_session.get(Animal, animal.id)
+
+    assert result.status == ApplicationStatus.ADOPTED
+    assert refreshed_application is not None
+    assert refreshed_application.status == ApplicationStatus.ADOPTED
+    assert refreshed_animal is not None
+    assert refreshed_animal.status == AnimalStatus.ADOPTED
+
+    history = db_session.scalars(
+        select(ApplicationStatusHistory)
+        .where(ApplicationStatusHistory.application_id == application.id)
+        .order_by(ApplicationStatusHistory.created_at)
+    ).all()
+
+    assert history[-1].status == ApplicationStatus.ADOPTED
+    assert history[-1].changed_by == adopter_profile.user_id
+
+
+def test_complete_adoption_closes_other_active_applications(
+    service_sessions: tuple[Session, Session],
+) -> None:
+    db_session, service_session = service_sessions
+    adopter_profile, animal = create_adopter_and_animal(db_session)
+
+    approved_application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.APPROVED,
+    )
+
+    other_adopter_profile, _ = create_adopter_and_animal(db_session)
+
+    other_application = create_application(
+        other_adopter_profile,
+        animal,
+        ApplicationStatus.UNDER_REVIEW,
+    )
+
+    db_session.add_all([approved_application, other_application])
+    db_session.commit()
+
+    service = ApplicationService(service_session)
+
+    service.complete_adoption(
+        application_id=approved_application.id,
+        changed_by=adopter_profile.user_id,
+    )
+
+    db_session.expire_all()
+
+    refreshed_approved = db_session.get(
+        Application,
+        approved_application.id,
+    )
+    refreshed_other = db_session.get(
+        Application,
+        other_application.id,
+    )
+
+    assert refreshed_approved is not None
+    assert refreshed_other is not None
+    assert refreshed_approved.status == ApplicationStatus.ADOPTED
+    assert (
+        refreshed_other.status
+        == ApplicationStatus.CLOSED_ANIMAL_ADOPTED
+    )
+
+    other_history = db_session.scalars(
+        select(ApplicationStatusHistory)
+        .where(
+            ApplicationStatusHistory.application_id
+            == other_application.id
+        )
+        .order_by(ApplicationStatusHistory.created_at)
+    ).all()
+
+    assert other_history[-1].status == ApplicationStatus.CLOSED_ANIMAL_ADOPTED
+    assert other_history[-1].changed_by == adopter_profile.user_id
+
+
+def test_complete_adoption_raises_when_application_does_not_exist(
+    service_sessions: tuple[Session, Session],
+) -> None:
+    _, service_session = service_sessions
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(ApplicationNotFoundError):
+        service.complete_adoption(
+            application_id=uuid.uuid4(),
+            changed_by=uuid.uuid4(),
+        )
+
+
+def test_complete_adoption_raises_when_animal_does_not_exist(
+    service_sessions: tuple[Session, Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session, service_session = service_sessions
+    adopter_profile, animal = create_adopter_and_animal(db_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.APPROVED,
+    )
+    db_session.add(application)
+    db_session.commit()
+
+    service = ApplicationService(service_session)
+
+    monkeypatch.setattr(
+        service.animal_repository,
+        "get_by_id",
+        lambda animal_id: None,
+    )
+
+    with pytest.raises(AnimalNotFoundError):
+        service.complete_adoption(
+            application_id=application.id,
+            changed_by=adopter_profile.user_id,
+        )
+
+
+def test_complete_adoption_raises_when_application_is_not_approved(
+    service_sessions: tuple[Session, Session],
+) -> None:
+    db_session, service_session = service_sessions
+    adopter_profile, animal = create_adopter_and_animal(db_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.UNDER_REVIEW,
+    )
+    db_session.add(application)
+    db_session.commit()
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(InvalidApplicationStatusTransitionError):
+        service.complete_adoption(
+            application_id=application.id,
+            changed_by=adopter_profile.user_id,
+        )
+
+    db_session.expire_all()
+
+    refreshed_application = db_session.get(Application, application.id)
+    refreshed_animal = db_session.get(Animal, animal.id)
+
+    assert refreshed_application is not None
+    assert refreshed_animal is not None
+    assert refreshed_application.status == ApplicationStatus.UNDER_REVIEW
+    assert refreshed_animal.status == AnimalStatus.AVAILABLE
+
+
+def test_complete_adoption_rolls_back_all_changes_when_a_later_operation_fails(
+    service_sessions: tuple[Session, Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session, service_session = service_sessions
+    adopter_profile, animal = create_adopter_and_animal(db_session)
+
+    approved_application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.APPROVED,
+    )
+
+    other_adopter_profile, _ = create_adopter_and_animal(db_session)
+
+    other_application = create_application(
+        other_adopter_profile,
+        animal,
+        ApplicationStatus.UNDER_REVIEW,
+    )
+
+    db_session.add_all(
+        [approved_application, other_application]
+    )
+    db_session.commit()
+
+    service = ApplicationService(service_session)
+
+    original_add_status_history = (
+        service.application_repository.add_status_history
+    )
+
+    call_count = 0
+
+    def failing_add_status_history(
+        status_history: ApplicationStatusHistory,
+    ) -> ApplicationStatusHistory:
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 2:
+            raise RuntimeError("simulated failure")
+
+        return original_add_status_history(status_history)
+
+    monkeypatch.setattr(
+        service.application_repository,
+        "add_status_history",
+        failing_add_status_history,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated failure"):
+        service.complete_adoption(
+            application_id=approved_application.id,
+            changed_by=adopter_profile.user_id,
+        )
+
+    db_session.expire_all()
+
+    refreshed_approved = db_session.get(
+        Application,
+        approved_application.id,
+    )
+    refreshed_other = db_session.get(
+        Application,
+        other_application.id,
+    )
+    refreshed_animal = db_session.get(
+        Animal,
+        animal.id,
+    )
+
+    assert refreshed_approved is not None
+    assert refreshed_other is not None
+    assert refreshed_animal is not None
+
+    assert refreshed_approved.status == ApplicationStatus.APPROVED
+    assert refreshed_other.status == ApplicationStatus.UNDER_REVIEW
+    assert refreshed_animal.status == AnimalStatus.AVAILABLE
+
+    approved_history = db_session.scalars(
+        select(ApplicationStatusHistory).where(
+            ApplicationStatusHistory.application_id
+            == approved_application.id
+        )
+    ).all()
+
+    other_history = db_session.scalars(
+        select(ApplicationStatusHistory).where(
+            ApplicationStatusHistory.application_id
+            == other_application.id
+        )
+    ).all()
+
+    assert approved_history == []
+    assert other_history == []
