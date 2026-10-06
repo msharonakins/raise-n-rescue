@@ -38,7 +38,7 @@ def test_database_is_at_expected_migration_head(db_session: Session):
         text("SELECT version_num FROM alembic_version")
     ).scalar_one()
 
-    assert revision == "0346aeed357c"
+    assert revision == "72438f37f02d"
 
 
 def test_database_has_required_constraints_and_indexes(

@@ -13,6 +13,7 @@ from backend.app.models.favourite import Favourite
 from backend.app.models.organisation import RescueOrganisation
 from backend.app.models.organisation_invitation import OrganisationInvitation
 from backend.app.models.user import User
+from backend.app.models.session import Session
 
 __all__ = [
     "AdopterChildAgeGroup",
@@ -32,5 +33,6 @@ __all__ = [
     "OrganisationInvitation",
     "PersonalityTrait",
     "RescueOrganisation",
+    "Session",
     "User",
 ]
