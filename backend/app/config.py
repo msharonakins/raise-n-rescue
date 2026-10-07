@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_name: str
     database_user: str
     database_password: str
+    session_lifetime_hours: int = 24
 
     model_config = SettingsConfigDict(
         env_file=".env",
