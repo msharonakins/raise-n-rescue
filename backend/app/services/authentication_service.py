@@ -93,3 +93,20 @@ class AuthenticationService:
                 raise AuthenticationError
 
             return user
+
+
+    def revoke_session(self, session_token: str) -> None:
+        token_hash = hash_session_token(session_token)
+
+        with self.session.begin():
+            user_session = self.session_repository.get_by_token_hash(
+                token_hash
+            )
+
+            if user_session is None:
+                raise AuthenticationError
+
+            if user_session.revoked_at is not None:
+                raise AuthenticationError
+
+            user_session.revoked_at = datetime.now(timezone.utc)

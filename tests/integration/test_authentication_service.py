@@ -209,3 +209,65 @@ def test_resolve_user_from_session_token_raises_for_revoked_session(
         service.resolve_user_from_session(
             authentication_result.session_token
         )
+
+
+def test_revoke_session_marks_session_as_revoked(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    user = create_user(setup_session)
+
+    service = AuthenticationService(service_session)
+
+    authentication_result = service.authenticate(
+        email=user.email,
+        password="correct-password",
+    )
+
+    service.revoke_session(authentication_result.session_token)
+
+    stored_session = service_session.scalar(
+        select(UserSession).where(UserSession.user_id == user.id)
+    )
+
+    assert stored_session is not None
+    assert stored_session.revoked_at is not None
+
+    service_session.commit()
+
+    with pytest.raises(AuthenticationError):
+        service.resolve_user_from_session(
+            authentication_result.session_token
+        )
+
+
+def test_revoke_session_raises_for_unknown_token(
+    service_sessions: tuple[Session, Session],
+):
+    _, service_session = service_sessions
+
+    service = AuthenticationService(service_session)
+
+    with pytest.raises(AuthenticationError):
+        service.revoke_session("unknown-session-token")
+
+
+def test_revoke_session_raises_for_already_revoked_session(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    user = create_user(setup_session)
+
+    service = AuthenticationService(service_session)
+
+    authentication_result = service.authenticate(
+        email=user.email,
+        password="correct-password",
+    )
+
+    service.revoke_session(authentication_result.session_token)
+
+    with pytest.raises(AuthenticationError):
+        service.revoke_session(authentication_result.session_token)
