@@ -4,8 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.core.enums import ApplicationStatus
+from backend.app.models.animal import Animal
 from backend.app.models.application import Application
 from backend.app.models.application_status_history import ApplicationStatusHistory
+from backend.app.models.facility import Facility
 
 
 class ApplicationRepository:
@@ -14,6 +16,18 @@ class ApplicationRepository:
 
     def get_by_id(self, application_id: uuid.UUID) -> Application | None:
         statement = select(Application).where(Application.id == application_id)
+        return self.session.execute(statement).scalar_one_or_none()
+
+    def get_organisation_id(
+        self,
+        application_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        statement = (
+            select(Facility.organisation_id)
+            .join(Animal, Animal.facility_id == Facility.id)
+            .join(Application, Application.animal_id == Animal.id)
+            .where(Application.id == application_id)
+        )
         return self.session.execute(statement).scalar_one_or_none()
 
     def get_active_by_adopter_and_animal(

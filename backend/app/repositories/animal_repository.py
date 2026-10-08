@@ -13,3 +13,11 @@ class AnimalRepository:
     def get_by_id(self, animal_id: uuid.UUID) -> Animal | None:
         statement = select(Animal).where(Animal.id == animal_id)
         return self.session.execute(statement).scalar_one_or_none()
+
+    def get_by_id_for_update(self, animal_id: uuid.UUID) -> Animal | None:
+        statement = (
+            select(Animal)
+            .where(Animal.id == animal_id)
+            .with_for_update()
+        )
+        return self.session.execute(statement).scalar_one_or_none()

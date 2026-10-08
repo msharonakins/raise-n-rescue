@@ -10,6 +10,10 @@ class AnimalNotFoundError(ApplicationError):
     """Raised when the requested animal does not exist."""
 
 
+class ApplicationAuthorisationError(ApplicationError):
+    """Raised when the actor is not authorised to perform an application action."""
+
+
 class ApplicationNotFoundError(ApplicationError):
     """Raised when the requested application does not exist."""
 

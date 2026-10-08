@@ -10,21 +10,30 @@ from backend.app.core.enums import (
     ChildAgeGroup,
     Size,
     Species,
+    UserRole,
 )
-from backend.app.models.animal import Animal
-from backend.app.models.application import Application
-from backend.app.models.application_status_history import ApplicationStatusHistory
-from backend.app.models.application_child_age_group import ApplicationChildAgeGroup
-from backend.app.models.application_preferred_size import ApplicationPreferredSize
-from backend.app.models.application_preferred_species import ApplicationPreferredSpecies
 from backend.app.models.adopter_child_age_group import AdopterChildAgeGroup
 from backend.app.models.adopter_preferred_size import AdopterPreferredSize
 from backend.app.models.adopter_preferred_species import AdopterPreferredSpecies
+from backend.app.models.animal import Animal
+from backend.app.models.application import Application
+from backend.app.models.application_child_age_group import ApplicationChildAgeGroup
+from backend.app.models.application_preferred_size import ApplicationPreferredSize
+from backend.app.models.application_preferred_species import (
+    ApplicationPreferredSpecies,
+)
+from backend.app.models.application_status_history import (
+    ApplicationStatusHistory,
+)
+from backend.app.models.facility import Facility
+from backend.app.models.organisation import RescueOrganisation
+from backend.app.models.user import User
 from backend.app.services.application_errors import (
     ActiveApplicationExistsError,
     AdopterProfileNotFoundError,
     AnimalNotAvailableError,
     AnimalNotFoundError,
+    ApplicationAuthorisationError,
     ApplicationNotFoundError,
     InvalidApplicationSubmissionError,
     InvalidApplicationStatusTransitionError,
@@ -35,6 +44,21 @@ from tests.integration.test_database import (
     create_adopter_and_animal,
     create_application,
 )
+
+
+def create_rescue_staff(
+    db_session: Session,
+    organisation_id: uuid.UUID,
+) -> User:
+    user = User(
+        email=f"rescue-staff-{uuid.uuid4()}@example.com",
+        password_hash="test-password-hash",
+        role=UserRole.RESCUE_STAFF,
+        organisation_id=organisation_id,
+    )
+    db_session.add(user)
+    db_session.flush()
+    return user
 
 
 def test_submit_application_creates_application_and_initial_history(
@@ -359,6 +383,15 @@ def test_transition_application_status_updates_status_and_creates_history(
     setup_session.add(application)
     setup_session.flush()
 
+    facility = setup_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        setup_session,
+        facility.organisation_id,
+    )
+    setup_session.commit()
+
     service = ApplicationService(service_session)
 
     note = "Initial application review completed."
@@ -366,7 +399,7 @@ def test_transition_application_status_updates_status_and_creates_history(
     updated_application = service.transition_application_status(
         application_id=application.id,
         target_status=ApplicationStatus.UNDER_REVIEW,
-        changed_by=adopter_profile.user_id,
+        actor=rescue_staff,
         note=note,
     )
 
@@ -380,7 +413,7 @@ def test_transition_application_status_updates_status_and_creates_history(
 
     assert len(status_history) == 1
     assert status_history[0].status == ApplicationStatus.UNDER_REVIEW
-    assert status_history[0].changed_by == adopter_profile.user_id
+    assert status_history[0].changed_by == rescue_staff.id
     assert status_history[0].note == note
 
 
@@ -391,11 +424,19 @@ def test_transition_application_status_raises_when_application_does_not_exist(
 
     service = ApplicationService(service_session)
 
+    actor = User(
+        id=uuid.uuid4(),
+        email="missing@example.com",
+        password_hash="test-password-hash",
+        role=UserRole.RESCUE_STAFF,
+        organisation_id=uuid.uuid4(),
+    )
+
     with pytest.raises(ApplicationNotFoundError):
         service.transition_application_status(
             application_id=uuid.uuid4(),
             target_status=ApplicationStatus.UNDER_REVIEW,
-            changed_by=uuid.uuid4(),
+            actor=actor,
         )
 
 
@@ -414,13 +455,22 @@ def test_transition_application_status_raises_for_invalid_transition(
     setup_session.add(application)
     setup_session.flush()
 
+    facility = setup_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        setup_session,
+        facility.organisation_id,
+    )
+    setup_session.commit()
+
     service = ApplicationService(service_session)
 
     with pytest.raises(InvalidApplicationStatusTransitionError):
         service.transition_application_status(
             application_id=application.id,
             target_status=ApplicationStatus.APPROVED,
-            changed_by=adopter_profile.user_id,
+            actor=rescue_staff,
         )
 
     assert application.status == ApplicationStatus.SUBMITTED
@@ -449,24 +499,33 @@ def test_transition_application_status_can_follow_multiple_valid_transitions(
     setup_session.add(application)
     setup_session.flush()
 
+    facility = setup_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        setup_session,
+        facility.organisation_id,
+    )
+    setup_session.commit()
+
     service = ApplicationService(service_session)
 
     service.transition_application_status(
         application_id=application.id,
         target_status=ApplicationStatus.UNDER_REVIEW,
-        changed_by=adopter_profile.user_id,
+        actor=rescue_staff,
     )
 
     service.transition_application_status(
         application_id=application.id,
         target_status=ApplicationStatus.HOME_CHECK,
-        changed_by=adopter_profile.user_id,
+        actor=rescue_staff,
     )
 
     service.transition_application_status(
         application_id=application.id,
         target_status=ApplicationStatus.APPROVED,
-        changed_by=adopter_profile.user_id,
+        actor=rescue_staff,
     )
 
     persisted_application = service_session.get(
@@ -490,6 +549,137 @@ def test_transition_application_status_can_follow_multiple_valid_transitions(
     ]
 
 
+def test_adopter_can_only_withdraw_own_application(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.SUBMITTED,
+    )
+    setup_session.add(application)
+    setup_session.commit()
+
+    adopter = setup_session.get(User, adopter_profile.user_id)
+    assert adopter is not None
+
+    service = ApplicationService(service_session)
+
+    updated_application = service.transition_application_status(
+        application_id=application.id,
+        target_status=ApplicationStatus.WITHDRAWN,
+        actor=adopter,
+    )
+
+    assert updated_application.status == ApplicationStatus.WITHDRAWN
+
+
+def test_adopter_cannot_manage_application_status(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.SUBMITTED,
+    )
+    setup_session.add(application)
+    setup_session.commit()
+
+    adopter = setup_session.get(User, adopter_profile.user_id)
+    assert adopter is not None
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(ApplicationAuthorisationError):
+        service.transition_application_status(
+            application_id=application.id,
+            target_status=ApplicationStatus.UNDER_REVIEW,
+            actor=adopter,
+        )
+
+
+def test_rescue_staff_cannot_manage_application_from_another_organisation(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.SUBMITTED,
+    )
+    setup_session.add(application)
+    setup_session.flush()
+
+    other_organisation = RescueOrganisation(
+        name="Other Rescue",
+        contact_email="other@example.com",
+        contact_phone="0000000000",
+        address="Other Address",
+    )
+    setup_session.add(other_organisation)
+    setup_session.flush()
+
+    rescue_staff = create_rescue_staff(
+        setup_session,
+        other_organisation.id,
+    )
+    setup_session.commit()
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(ApplicationAuthorisationError):
+        service.transition_application_status(
+            application_id=application.id,
+            target_status=ApplicationStatus.UNDER_REVIEW,
+            actor=rescue_staff,
+        )
+
+
+def test_transition_application_status_cannot_directly_adopt(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    adopter_profile, animal = create_adopter_and_animal(setup_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.APPROVED,
+    )
+    setup_session.add(application)
+    setup_session.flush()
+
+    facility = setup_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        setup_session,
+        facility.organisation_id,
+    )
+    setup_session.commit()
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(InvalidApplicationStatusTransitionError):
+        service.transition_application_status(
+            application_id=application.id,
+            target_status=ApplicationStatus.ADOPTED,
+            actor=rescue_staff,
+        )
+
+
 def test_complete_adoption_updates_application_and_animal(
     service_sessions: tuple[Session, Session],
 ) -> None:
@@ -504,11 +694,20 @@ def test_complete_adoption_updates_application_and_animal(
     db_session.add(application)
     db_session.commit()
 
+    facility = db_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        db_session,
+        facility.organisation_id,
+    )
+    db_session.commit()
+
     service = ApplicationService(service_session)
 
     result = service.complete_adoption(
         application_id=application.id,
-        changed_by=adopter_profile.user_id,
+        actor=rescue_staff,
     )
 
     db_session.expire_all()
@@ -529,7 +728,7 @@ def test_complete_adoption_updates_application_and_animal(
     ).all()
 
     assert history[-1].status == ApplicationStatus.ADOPTED
-    assert history[-1].changed_by == adopter_profile.user_id
+    assert history[-1].changed_by == rescue_staff.id
 
 
 def test_complete_adoption_closes_other_active_applications(
@@ -555,11 +754,20 @@ def test_complete_adoption_closes_other_active_applications(
     db_session.add_all([approved_application, other_application])
     db_session.commit()
 
+    facility = db_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        db_session,
+        facility.organisation_id,
+    )
+    db_session.commit()
+
     service = ApplicationService(service_session)
 
     service.complete_adoption(
         application_id=approved_application.id,
-        changed_by=adopter_profile.user_id,
+        actor=rescue_staff,
     )
 
     db_session.expire_all()
@@ -591,7 +799,7 @@ def test_complete_adoption_closes_other_active_applications(
     ).all()
 
     assert other_history[-1].status == ApplicationStatus.CLOSED_ANIMAL_ADOPTED
-    assert other_history[-1].changed_by == adopter_profile.user_id
+    assert other_history[-1].changed_by == rescue_staff.id
 
 
 def test_complete_adoption_raises_when_application_does_not_exist(
@@ -601,10 +809,18 @@ def test_complete_adoption_raises_when_application_does_not_exist(
 
     service = ApplicationService(service_session)
 
+    actor = User(
+        id=uuid.uuid4(),
+        email="missing-rescue-staff@example.com",
+        password_hash="test-password-hash",
+        role=UserRole.RESCUE_STAFF,
+        organisation_id=uuid.uuid4(),
+    )
+
     with pytest.raises(ApplicationNotFoundError):
         service.complete_adoption(
             application_id=uuid.uuid4(),
-            changed_by=uuid.uuid4(),
+            actor=actor,
         )
 
 
@@ -623,18 +839,27 @@ def test_complete_adoption_raises_when_animal_does_not_exist(
     db_session.add(application)
     db_session.commit()
 
+    facility = db_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        db_session,
+        facility.organisation_id,
+    )
+    db_session.commit()
+
     service = ApplicationService(service_session)
 
     monkeypatch.setattr(
         service.animal_repository,
-        "get_by_id",
+        "get_by_id_for_update",
         lambda animal_id: None,
     )
 
     with pytest.raises(AnimalNotFoundError):
         service.complete_adoption(
             application_id=application.id,
-            changed_by=adopter_profile.user_id,
+            actor=rescue_staff,
         )
 
 
@@ -652,12 +877,21 @@ def test_complete_adoption_raises_when_application_is_not_approved(
     db_session.add(application)
     db_session.commit()
 
+    facility = db_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        db_session,
+        facility.organisation_id,
+    )
+    db_session.commit()
+
     service = ApplicationService(service_session)
 
     with pytest.raises(InvalidApplicationStatusTransitionError):
         service.complete_adoption(
             application_id=application.id,
-            changed_by=adopter_profile.user_id,
+            actor=rescue_staff,
         )
 
     db_session.expire_all()
@@ -697,6 +931,15 @@ def test_complete_adoption_rolls_back_all_changes_when_a_later_operation_fails(
     )
     db_session.commit()
 
+    facility = db_session.get(Facility, animal.facility_id)
+    assert facility is not None
+
+    rescue_staff = create_rescue_staff(
+        db_session,
+        facility.organisation_id,
+    )
+    db_session.commit()
+
     service = ApplicationService(service_session)
 
     original_add_status_history = (
@@ -725,7 +968,7 @@ def test_complete_adoption_rolls_back_all_changes_when_a_later_operation_fails(
     with pytest.raises(RuntimeError, match="simulated failure"):
         service.complete_adoption(
             application_id=approved_application.id,
-            changed_by=adopter_profile.user_id,
+            actor=rescue_staff,
         )
 
     db_session.expire_all()

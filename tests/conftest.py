@@ -1,7 +1,10 @@
 import os
-from collections.abc import Generator
-
 import pytest
+from collections.abc import Generator
+from fastapi.testclient import TestClient
+
+from backend.app.api.dependencies import get_db
+from backend.app.main import app
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -79,3 +82,18 @@ def service_sessions(
         setup_session.close()
         transaction.rollback()
         connection.close()
+
+
+@pytest.fixture
+def client(
+    db_session: Session,
+) -> Generator[TestClient, None, None]:
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()

@@ -3,7 +3,8 @@ import uuid
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.core.enums import AnimalStatus, ApplicationStatus
+from backend.app.core.enums import AnimalStatus, ApplicationStatus, UserRole
+from backend.app.models.user import User
 from backend.app.models.application import Application
 from backend.app.models.application_child_age_group import ApplicationChildAgeGroup
 from backend.app.models.application_preferred_size import ApplicationPreferredSize
@@ -19,6 +20,7 @@ from backend.app.services.application_errors import (
     AdopterProfileNotFoundError,
     AnimalNotAvailableError,
     AnimalNotFoundError,
+    ApplicationAuthorisationError,
     ApplicationNotFoundError,
     InvalidApplicationSubmissionError,
     InvalidApplicationStatusTransitionError,
@@ -50,6 +52,49 @@ class ApplicationService:
         self.adopter_profile_repository = AdopterProfileRepository(session)
         self.animal_repository = AnimalRepository(session)
         self.application_repository = ApplicationRepository(session)
+
+    def _authorise_application_action(
+        self,
+        application: Application,
+        actor: User,
+        target_status: ApplicationStatus,
+    ) -> None:
+        if actor.role == UserRole.ADOPTER:
+            adopter_profile = (
+                self.adopter_profile_repository.get_by_user_id(actor.id)
+            )
+
+            if (
+                adopter_profile is None
+                or adopter_profile.id != application.adopter_profile_id
+                or target_status != ApplicationStatus.WITHDRAWN
+            ):
+                raise ApplicationAuthorisationError(
+                    "You are not authorised to perform this application action."
+                )
+
+            return
+
+        if actor.role == UserRole.RESCUE_STAFF:
+            organisation_id = (
+                self.application_repository.get_organisation_id(
+                    application.id
+                )
+            )
+
+            if (
+                organisation_id is None
+                or actor.organisation_id != organisation_id
+            ):
+                raise ApplicationAuthorisationError(
+                    "You are not authorised to perform this application action."
+                )
+
+            return
+
+        raise ApplicationAuthorisationError(
+            "You are not authorised to perform this application action."
+        )
 
     def submit_application(
         self,
@@ -187,7 +232,7 @@ class ApplicationService:
         self,
         application_id: uuid.UUID,
         target_status: ApplicationStatus,
-        changed_by: uuid.UUID,
+        actor: User,
         note: str | None = None,
     ) -> Application:
         with self.session.begin():
@@ -195,6 +240,21 @@ class ApplicationService:
 
             if application is None:
                 raise ApplicationNotFoundError("Application not found.")
+
+            if target_status in (
+                ApplicationStatus.ADOPTED,
+                ApplicationStatus.CLOSED_ANIMAL_ADOPTED,
+            ):
+                raise InvalidApplicationStatusTransitionError(
+                    f"Cannot transition application directly to "
+                    f"{target_status.value}."
+                )
+
+            self._authorise_application_action(
+                application,
+                actor,
+                target_status,
+            )
 
             if not is_valid_application_status_transition(
                 application.status,
@@ -210,7 +270,7 @@ class ApplicationService:
             status_history = ApplicationStatusHistory(
                 application_id=application.id,
                 status=target_status,
-                changed_by=changed_by,
+                changed_by=actor.id,
                 note=note,
             )
 
@@ -221,7 +281,7 @@ class ApplicationService:
     def complete_adoption(
         self,
         application_id: uuid.UUID,
-        changed_by: uuid.UUID,
+        actor: User,
     ) -> Application:
         with self.session.begin():
             application = self.application_repository.get_by_id(
@@ -233,13 +293,37 @@ class ApplicationService:
                     "Application not found."
                 )
 
-            animal = self.animal_repository.get_by_id(
+            animal = self.animal_repository.get_by_id_for_update(
                 application.animal_id
             )
 
             if animal is None:
                 raise AnimalNotFoundError(
                     "Animal not found."
+                )
+
+            if actor.role != UserRole.RESCUE_STAFF:
+                raise ApplicationAuthorisationError(
+                    "Only rescue staff can complete an adoption."
+                )
+
+            organisation_id = (
+                self.application_repository.get_organisation_id(
+                    application.id
+                )
+            )
+
+            if (
+                organisation_id is None
+                or actor.organisation_id != organisation_id
+            ):
+                raise ApplicationAuthorisationError(
+                    "You are not authorised to complete this adoption."
+                )
+
+            if animal.status != AnimalStatus.AVAILABLE:
+                raise AnimalNotAvailableError(
+                    "Animal is not currently available for adoption."
                 )
 
             if not is_valid_application_status_transition(
@@ -258,7 +342,7 @@ class ApplicationService:
             status_history = ApplicationStatusHistory(
                 application_id=application.id,
                 status=ApplicationStatus.ADOPTED,
-                changed_by=changed_by,
+                changed_by=actor.id,
                 note=None,
             )
 
@@ -283,7 +367,7 @@ class ApplicationService:
                 other_status_history = ApplicationStatusHistory(
                     application_id=other_application.id,
                     status=ApplicationStatus.CLOSED_ANIMAL_ADOPTED,
-                    changed_by=changed_by,
+                    changed_by=actor.id,
                     note=None,
                 )
 
