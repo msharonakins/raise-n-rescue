@@ -680,6 +680,90 @@ def test_transition_application_status_cannot_directly_adopt(
         )
 
 
+def test_adopter_cannot_complete_adoption(
+    service_sessions: tuple[Session, Session],
+) -> None:
+    db_session, service_session = service_sessions
+    adopter_profile, animal = create_adopter_and_animal(db_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.APPROVED,
+    )
+    db_session.add(application)
+    db_session.commit()
+
+    adopter = db_session.get(User, adopter_profile.user_id)
+    assert adopter is not None
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(ApplicationAuthorisationError):
+        service.complete_adoption(
+            application_id=application.id,
+            actor=adopter,
+        )
+
+    db_session.expire_all()
+
+    refreshed_application = db_session.get(Application, application.id)
+    refreshed_animal = db_session.get(Animal, animal.id)
+
+    assert refreshed_application is not None
+    assert refreshed_animal is not None
+    assert refreshed_application.status == ApplicationStatus.APPROVED
+    assert refreshed_animal.status == AnimalStatus.AVAILABLE
+
+
+def test_rescue_staff_cannot_complete_adoption_for_another_organisation(
+    service_sessions: tuple[Session, Session],
+) -> None:
+    db_session, service_session = service_sessions
+    adopter_profile, animal = create_adopter_and_animal(db_session)
+
+    application = create_application(
+        adopter_profile,
+        animal,
+        ApplicationStatus.APPROVED,
+    )
+    db_session.add(application)
+    db_session.flush()
+
+    other_organisation = RescueOrganisation(
+        name="Other Rescue",
+        contact_email="other-rescue@example.com",
+        contact_phone="0000000000",
+        address="Other Address",
+    )
+    db_session.add(other_organisation)
+    db_session.flush()
+
+    rescue_staff = create_rescue_staff(
+        db_session,
+        other_organisation.id,
+    )
+    db_session.commit()
+
+    service = ApplicationService(service_session)
+
+    with pytest.raises(ApplicationAuthorisationError):
+        service.complete_adoption(
+            application_id=application.id,
+            actor=rescue_staff,
+        )
+
+    db_session.expire_all()
+
+    refreshed_application = db_session.get(Application, application.id)
+    refreshed_animal = db_session.get(Animal, animal.id)
+
+    assert refreshed_application is not None
+    assert refreshed_animal is not None
+    assert refreshed_application.status == ApplicationStatus.APPROVED
+    assert refreshed_animal.status == AnimalStatus.AVAILABLE
+
+
 def test_complete_adoption_updates_application_and_animal(
     service_sessions: tuple[Session, Session],
 ) -> None:
