@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     database_user: str
     database_password: str
     session_lifetime_hours: int = 24
+    cookie_secure: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

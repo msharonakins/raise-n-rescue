@@ -1,9 +1,11 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.config import settings
 from backend.app.core.enums import AccountStatus, UserRole
 from backend.app.models.session import Session as UserSession
 from backend.app.models.user import User
@@ -454,3 +456,35 @@ def test_register_rejects_invalid_input(client):
     )
 
     assert response.status_code == 422
+
+
+def test_register_sets_secure_cookies_when_configured(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "cookie_secure", True)
+
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "secure-cookie@example.com",
+            "password": "correct-horse-battery",
+        },
+    )
+
+    assert response.status_code == 201
+
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    session_cookie = next(
+        cookie for cookie in set_cookie_headers
+        if cookie.startswith("session=")
+    )
+    csrf_cookie = next(
+        cookie for cookie in set_cookie_headers
+        if cookie.startswith("csrf_token=")
+    )
+
+    assert "Secure" in session_cookie
+    assert "Secure" in csrf_cookie
+    assert "HttpOnly" in session_cookie
+    assert "HttpOnly" not in csrf_cookie

@@ -80,18 +80,18 @@ Password values must not be written to application logs, error messages, test ou
 
 ## 5. Session security
 
-The session cookie should use security-focused attributes appropriate to the deployment environment:
-
-- `HttpOnly` to prevent JavaScript from reading the session identifier
-- `Secure` when served over HTTPS
-- an appropriate `SameSite` policy
-- a limited session lifetime
-
 The server must treat the session as the source of authenticated identity rather than trusting identity information supplied by the client.
 
-Logout must invalidate the server-side session so that a previously authenticated session cannot continue to be used.
+The application uses server-managed sessions. The server stores session records and sends the session identifier to the browser in an HTTP-only cookie. Logging out invalidates the server-side session and clears the session cookie.
 
-Session management is part of the intended authentication architecture but is not yet implemented in the current application.
+The session and CSRF cookies use the `SameSite=Lax` policy and a limited lifetime configured by `SESSION_LIFETIME_HOURS`. The `COOKIE_SECURE` setting controls the `Secure` attribute on cookies:
+
+- Set `COOKIE_SECURE=false` for local development over HTTP.
+- Set `COOKIE_SECURE=true` in production when the application is served over HTTPS.
+
+The session cookie is HTTP-only so JavaScript cannot read the session identifier. The CSRF cookie is intentionally readable by JavaScript so the frontend can send its token in the required request header.
+
+Production deployment must use HTTPS and enable secure cookies. These settings do not, by themselves, replace the need for CSRF protection, appropriate authorisation, or other production security controls.
 
 ## 6. Cross-site request forgery protection
 
@@ -99,7 +99,7 @@ Because authentication uses cookies, the application must protect state-changing
 
 CSRF protection is required for authenticated state-changing operations such as profile updates, favourites, application submission, status changes, and adoption completion.
 
-The exact CSRF mechanism will be selected during authentication implementation and must be tested as part of the security test suite.
+The current logout endpoint requires a CSRF token in both the readable `csrf_token` cookie and the `X-CSRF-Token` request header. The backend rejects requests when either value is missing or the values do not match. Each additional state-changing endpoint must enforce and test appropriate CSRF protection as it is implemented.
 
 ## 7. Authorisation
 
