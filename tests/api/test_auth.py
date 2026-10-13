@@ -181,6 +181,25 @@ def test_me_returns_401_for_revoked_session(
     assert response.json() == {"detail": "Authentication required"}
 
 
+def test_me_returns_401_when_user_becomes_inactive(
+    client,
+    db_session: Session,
+):
+    user = create_user(db_session)
+    token = create_session(db_session, user)
+
+    user.account_status = AccountStatus.INACTIVE
+    db_session.commit()
+
+    response = client.get(
+        "/api/auth/me",
+        cookies={"session": token},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Authentication required"}
+
+
 def test_me_returns_401_for_expired_session(
     client,
     db_session: Session,

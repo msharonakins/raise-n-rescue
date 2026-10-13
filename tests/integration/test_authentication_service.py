@@ -306,6 +306,28 @@ def test_resolve_user_from_session_token_raises_for_revoked_session(
         )
 
 
+def test_resolve_user_from_session_token_raises_for_inactive_user(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    user = create_user(setup_session)
+    service = AuthenticationService(service_session)
+
+    authentication_result = service.authenticate(
+        email=user.email,
+        password="correct-password",
+    )
+
+    user.account_status = AccountStatus.INACTIVE
+    setup_session.commit()
+
+    with pytest.raises(AuthenticationError):
+        service.resolve_user_from_session(
+            authentication_result.session_token
+        )
+
+
 def test_revoke_session_marks_session_as_revoked(
     service_sessions: tuple[Session, Session],
 ):
