@@ -388,3 +388,82 @@ def test_revoke_session_raises_for_already_revoked_session(
 
     with pytest.raises(AuthenticationError):
         service.revoke_session(authentication_result.session_token)
+
+
+def test_register_adopter_creates_user_and_session(
+    service_sessions: tuple[Session, Session],
+):
+    _, service_session = service_sessions
+    service = AuthenticationService(service_session)
+
+    result = service.register_adopter(
+        email="  New.Adopter@Example.com ",
+        password="correct-horse-battery",
+    )
+
+    assert result.user.email == "new.adopter@example.com"
+    assert result.user.role == UserRole.ADOPTER
+    assert result.user.organisation_id is None
+    assert result.user.account_status == AccountStatus.ACTIVE
+    assert result.user.password_hash != "correct-horse-battery"
+
+    assert result.session_token
+
+    stored_session = service_session.scalar(
+        select(UserSession).where(
+            UserSession.user_id == result.user.id
+        )
+    )
+
+    assert stored_session is not None
+    assert stored_session.token_hash == hash_session_token(
+        result.session_token
+    )
+    assert stored_session.revoked_at is None
+
+
+def test_register_adopter_rejects_duplicate_canonical_email(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    existing_user = create_user(setup_session)
+    service = AuthenticationService(service_session)
+
+    from backend.app.services.registration_errors import (
+        EmailAlreadyRegisteredError,
+    )
+
+    with pytest.raises(EmailAlreadyRegisteredError):
+        service.register_adopter(
+            email=f"  {existing_user.email.upper()} ",
+            password="correct-horse-battery",
+        )
+
+    assert service_session.scalars(select(UserSession)).all() == []
+
+
+def test_register_adopter_rolls_back_user_if_session_creation_fails(
+    service_sessions: tuple[Session, Session],
+):
+    _, service_session = service_sessions
+    service = AuthenticationService(service_session)
+
+    with patch.object(
+        service.session_repository,
+        "add",
+        side_effect=RuntimeError("Simulated session persistence failure"),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="Simulated session persistence failure",
+        ):
+            service.register_adopter(
+                email="rollback@example.com",
+                password="correct-horse-battery",
+            )
+
+    user = service_session.scalar(
+        select(User).where(User.email == "rollback@example.com")
+    )
+    assert user is None

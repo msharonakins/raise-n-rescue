@@ -354,3 +354,103 @@ def test_logout_returns_403_for_missing_csrf_header(client):
 
     assert response.status_code == 403
     assert response.json() == {"detail": "CSRF validation failed"}
+
+
+def test_register_creates_adopter_and_sets_session_cookies(
+    client,
+    db_session: Session,
+):
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "  New.Adopter@Example.com ",
+            "password": "correct-horse-battery",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["user"]["email"] == "new.adopter@example.com"
+    assert body["user"]["role"] == "ADOPTER"
+    assert body["user"]["id"]
+
+    assert "session" in response.cookies
+    assert "csrf_token" in response.cookies
+
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    session_cookie = next(
+        cookie for cookie in set_cookie_headers
+        if cookie.startswith("session=")
+    )
+    csrf_cookie = next(
+        cookie for cookie in set_cookie_headers
+        if cookie.startswith("csrf_token=")
+    )
+
+    assert "HttpOnly" in session_cookie
+    assert "HttpOnly" not in csrf_cookie
+    assert "Path=/" in session_cookie
+    assert "Path=/" in csrf_cookie
+    assert "SameSite=lax" in session_cookie
+    assert "SameSite=lax" in csrf_cookie
+
+    user = db_session.scalar(
+        select(User).where(User.email == "new.adopter@example.com")
+    )
+    assert user is not None
+    assert user.role == UserRole.ADOPTER
+    assert user.organisation_id is None
+    assert user.password_hash != "correct-horse-battery"
+
+    stored_session = db_session.scalar(
+        select(UserSession).where(UserSession.user_id == user.id)
+    )
+    assert stored_session is not None
+    assert stored_session.revoked_at is None
+
+
+def test_register_returns_409_for_duplicate_canonical_email(
+    client,
+    db_session: Session,
+):
+    existing_user = create_user(db_session)
+    existing_email = existing_user.email
+    db_session.commit()
+
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": f"  {existing_email.upper()} ",
+            "password": "correct-horse-battery",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Email already registered"
+    }
+
+
+def test_register_rejects_client_selected_role(client):
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "role-test@example.com",
+            "password": "correct-horse-battery",
+            "role": "RESCUE_STAFF",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_register_rejects_invalid_input(client):
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "not-an-email",
+            "password": "short",
+        },
+    )
+
+    assert response.status_code == 422

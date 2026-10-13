@@ -10,6 +10,10 @@ class UserRepository:
     def __init__(self, session: Session):
         self.session = session
 
+    def add(self, user: User) -> User:
+        self.session.add(user)
+        return user
+
     def get_by_email(self, email: str) -> User | None:
         statement = select(User).where(User.email == email)
         return self.session.execute(statement).scalar_one_or_none()
