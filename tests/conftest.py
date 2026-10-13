@@ -31,11 +31,11 @@ def test_engine(test_database_url: str) -> Generator[Engine, None, None]:
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    if revision != "72438f37f02d":
+    if revision != "6c48bc6e88db":
         engine.dispose()
         pytest.fail(
             "Test database is not at the expected Alembic head "
-            f"(expected 72438f37f02d, found {revision})."
+            f"(expected 6c48bc6e88db, found {revision})."
         )
 
     yield engine

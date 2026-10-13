@@ -13,6 +13,7 @@ from backend.app.security.session_token import (
     generate_session_token,
     hash_session_token,
 )
+from backend.app.security.email import normalize_email
 from backend.app.services.authentication_errors import AuthenticationError
 
 
@@ -38,7 +39,7 @@ class AuthenticationService:
         password: str,
     ) -> AuthenticationResult:
         with self.session.begin():
-            user = self.user_repository.get_by_email(email)
+            user = self.user_repository.get_by_email(normalize_email(email))
 
             if user is None:
                 verify_password(password, _DUMMY_PASSWORD_HASH)

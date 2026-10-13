@@ -70,6 +70,23 @@ def test_authenticate_creates_session_and_returns_raw_token(
     assert stored_session.expires_at <= expected_expiry + timedelta(seconds=5)
 
 
+def test_authenticate_normalizes_email_before_lookup(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    user = create_user(setup_session)
+    service = AuthenticationService(service_session)
+
+    result = service.authenticate(
+        email=f"  {user.email.upper()}  ",
+        password="correct-password",
+    )
+
+    assert result.user.id == user.id
+    assert result.session_token
+
+
 def test_authenticate_raises_for_unknown_email(
     service_sessions: tuple[Session, Session],
 ):

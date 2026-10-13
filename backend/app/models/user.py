@@ -1,7 +1,16 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, Enum as SAEnum, ForeignKey, String, Uuid
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Index,
+    String,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.core.enums import AccountStatus, UserRole
@@ -19,7 +28,6 @@ class User(Base):
 
     email: Mapped[str] = mapped_column(
         String(320),
-        unique=True,
         nullable=False,
     )
 
@@ -63,5 +71,10 @@ class User(Base):
             "(role = 'ADOPTER' AND organisation_id IS NULL) "
             "OR (role = 'RESCUE_STAFF' AND organisation_id IS NOT NULL)",
             name="ck_users_role_organisation",
+        ),
+        Index(
+            "uq_users_email_canonical",
+            func.lower(func.trim(email)),
+            unique=True,
         ),
     )
