@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -9,7 +10,10 @@ from backend.app.core.enums import AccountStatus, UserRole
 from backend.app.models.session import Session as UserSession
 from backend.app.models.user import User
 from backend.app.services.authentication_errors import AuthenticationError
-from backend.app.services.authentication_service import AuthenticationService
+from backend.app.services.authentication_service import (
+    AuthenticationService,
+    _DUMMY_PASSWORD_HASH,
+)
 from backend.app.security.password import hash_password
 from backend.app.security.session_token import hash_session_token
 
@@ -118,6 +122,80 @@ def test_authenticate_raises_for_inactive_user(
             password="correct-password",
         )
 
+    assert service_session.scalars(select(UserSession)).all() == []
+
+
+def test_authenticate_verifies_dummy_hash_for_unknown_email(
+    service_sessions: tuple[Session, Session],
+):
+    _, service_session = service_sessions
+
+    service = AuthenticationService(service_session)
+
+    with patch(
+        "backend.app.services.authentication_service.verify_password",
+        return_value=False,
+    ) as verify_mock:
+        with pytest.raises(AuthenticationError):
+            service.authenticate(
+                email="missing@example.com",
+                password="correct-password",
+            )
+
+    verify_mock.assert_called_once()
+    assert verify_mock.call_args.args[1] == _DUMMY_PASSWORD_HASH
+    assert verify_mock.call_args.args[0] == "correct-password"
+    assert service_session.scalars(select(UserSession)).all() == []
+
+
+def test_authenticate_verifies_dummy_hash_for_inactive_user(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    user = create_user(
+        setup_session,
+        account_status=AccountStatus.INACTIVE,
+    )
+
+    service = AuthenticationService(service_session)
+
+    with patch(
+        "backend.app.services.authentication_service.verify_password",
+        return_value=False,
+    ) as verify_mock:
+        with pytest.raises(AuthenticationError):
+            service.authenticate(
+                email=user.email,
+                password="correct-password",
+            )
+
+    verify_mock.assert_called_once()
+    assert verify_mock.call_args.args[1] == _DUMMY_PASSWORD_HASH
+    assert verify_mock.call_args.args[0] == "correct-password"
+    assert service_session.scalars(select(UserSession)).all() == []
+
+
+def test_authenticate_verifies_password_for_active_user_with_wrong_password(
+    service_sessions: tuple[Session, Session],
+):
+    setup_session, service_session = service_sessions
+
+    user = create_user(setup_session)
+    service = AuthenticationService(service_session)
+
+    with patch(
+        "backend.app.services.authentication_service.verify_password",
+        return_value=False,
+    ) as verify_mock:
+        with pytest.raises(AuthenticationError):
+            service.authenticate(
+                email=user.email,
+                password="wrong-password",
+            )
+
+    verify_mock.assert_called_once()
+    assert verify_mock.call_args.args[0] == "wrong-password"
     assert service_session.scalars(select(UserSession)).all() == []
 
 

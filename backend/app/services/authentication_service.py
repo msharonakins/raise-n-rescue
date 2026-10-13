@@ -8,12 +8,15 @@ from backend.app.models.session import Session as UserSession
 from backend.app.models.user import User
 from backend.app.repositories.session_repository import SessionRepository
 from backend.app.repositories.user_repository import UserRepository
-from backend.app.security.password import verify_password
+from backend.app.security.password import hash_password, verify_password
 from backend.app.security.session_token import (
     generate_session_token,
     hash_session_token,
 )
 from backend.app.services.authentication_errors import AuthenticationError
+
+
+_DUMMY_PASSWORD_HASH = hash_password("raise-n-rescue-dummy-password")
 
 
 class AuthenticationResult:
@@ -28,6 +31,7 @@ class AuthenticationService:
         self.user_repository = UserRepository(session)
         self.session_repository = SessionRepository(session)
 
+
     def authenticate(
         self,
         email: str,
@@ -37,9 +41,11 @@ class AuthenticationService:
             user = self.user_repository.get_by_email(email)
 
             if user is None:
+                verify_password(password, _DUMMY_PASSWORD_HASH)
                 raise AuthenticationError
 
             if user.account_status != AccountStatus.ACTIVE:
+                verify_password(password, _DUMMY_PASSWORD_HASH)
                 raise AuthenticationError
 
             if not verify_password(password, user.password_hash):
